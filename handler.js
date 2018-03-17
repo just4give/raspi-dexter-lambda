@@ -3,6 +3,9 @@ const request = require('request');
 const AWS = require('aws-sdk');
 AWS.config.update({region:'us-east-1'});
 const rekognition = new AWS.Rekognition();
+const moment = require('moment-timezone');
+const sns = new AWS.SNS();
+const s3 = new AWS.S3();
 
 var config = {
   "awsRegion":"us-east-1",
@@ -33,20 +36,43 @@ module.exports.bot = (event, context, callback) => {
                         }else{
                           body = JSON.parse(body);
                           console.log('body',body);
+                          console.log('now',new Date());
 
-                          if(body.status ==='matched' || body.status ==='error'){
-                            var hour = new Date().getHours();
+
+                          if(body.status ==='matched'){
+                            var hour = parseInt(moment().tz('America/New_York').format('h'));
+                            console.log('hour',hour);
                             var content="";
 
                             if(hour >= 5 && hour<12){
-                              content ="Good morning, "+ body.message+" !. Have a nice day!";
+                              content ="Good morning, "+ body.message+" ! Have a nice day!";
                             }else if(hour >=12 && hour <18){
-                              content ="Good afternoon, "+ body.message+" !. Have a nice rest of the day!";
+                              content ="Good afternoon, "+ body.message+" ! Have a nice rest of the day!";
                             }else if(hour >=18 && hour < 21){
-                              content ="Good evening, "+ body.message+" !. Talk to you soon!";
+                              content ="Good evening, "+ body.message+" ! Talk to you soon!";
                             }else{
-                              content ="Hi, "+ body.message+" !. It's been a long day! Good Night!";
+                              content ="Hi, "+ body.message+" ! It's been a long day! Good Night!";
                             }
+
+                            const url = s3.getSignedUrl('getObject', {
+                                Bucket: config.s3Bucket,
+                                Key: body.key,
+                                Expires: 300
+                            })
+
+                            //console.log(url)
+
+                            sns.publish({
+                              Message: 'I just saw '+ body.message+' . See the image I captured. Link will expire in 5 minutes. ' + url,
+                              TopicArn: 'arn:aws:sns:us-east-1:027378352884:raspiFaceTextMessage'
+                            }, function (err, data) {
+                              if(err){
+                                console.log("error", err);
+                              }else{
+                                console.log('success',data);
+                              }
+
+                            });
 
                             callback(null,{
                                 sessionAttributes: {key: body.key},
@@ -73,7 +99,7 @@ module.exports.bot = (event, context, callback) => {
 
                                 },
                             })
-                          }else{
+                          }else if(body.status==='unmatched'){
                             callback(null,{
                                 sessionAttributes: {key: body.key},
                                 dialogAction: {
@@ -114,7 +140,28 @@ module.exports.bot = (event, context, callback) => {
                         if (err) {
                           console.log(err, err.stack);
                         }else{
-                          console.log(data);           // successful response
+                          //console.log(data);
+
+                          const url = s3.getSignedUrl('getObject', {
+                              Bucket: config.s3Bucket,
+                              Key: key,
+                              Expires: 300
+                          })
+
+                          //console.log(url)
+
+                          sns.publish({
+                            Message: 'I stored face of '+ name+' . See the image I loaded in my brain. Link will expire in 5 minutes. ' + url,
+                            TopicArn: 'arn:aws:sns:us-east-1:027378352884:raspiFaceTextMessage'
+                          }, function (err, data) {
+                            if(err){
+                              console.log("error", err);
+                            }else{
+                              console.log('success',data);
+                            }
+
+                          });
+
                           callback(null,{
                               sessionAttributes: {key: key},
                               dialogAction: {
@@ -192,6 +239,22 @@ module.exports.bot = (event, context, callback) => {
                  });
 
                     break;
+
+              case 'CloseIntent':
+                    callback(null,{
+                        sessionAttributes: {},
+                        dialogAction: {
+                            type: 'Close',
+                            fulfillmentState:'Fulfilled',
+                            message:{
+                                contentType: 'PlainText',
+                                content: "Good bye!"
+                            }
+
+                        },
+                    })
+
+              break;
           default:
 
         }
